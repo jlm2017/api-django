@@ -1,15 +1,14 @@
 from data_france.models import CodePostal
 from django import forms
 from django.db import IntegrityError
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
-from django.urls import reverse
 
 from agir.elus.models import DELEGATIONS_CHOICES
 from agir.lib.data import FRANCE_COUNTRY_CODES
 from agir.people.actions.subscription import (
     SUBSCRIPTION_TYPE_NSP,
-    SUBSCRIPTION_TYPE_LFI,
     SUBSCRIPTION_TYPE_ADMIN,
 )
 from agir.people.models import PersonEmail, Person
