@@ -1,4 +1,4 @@
-from django.db.models import TextChoices, IntegerChoices
+from django.db.models import TextChoices
 
 
 class Etat(TextChoices):
@@ -12,6 +12,7 @@ class TypeDocument(TextChoices):
     JUSTIFICATIF = "JUS", "Justificatif de dépense"
     DEVIS = "DEV", "Devis"
     PAIEMENT = "PAY", "Preuve de paiement"
+    ATTESTATION_GRATUITE = "GRA", "Attestation de gratuité"
     AUTRE = "AUT", "Autre (à détailler dans les commentaires)"
 
 

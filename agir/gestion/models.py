@@ -175,7 +175,7 @@ class Compte(models.Model):
         verbose_name_plural = "Comptes"
 
 
-@reversion.register()
+@reversion.register(follow=["documents", "depenses"])
 class Projet(NumeroUniqueMixin, models.Model):
     """Le projet regroupe ensemble des dépenses liées entre elles
 
@@ -216,7 +216,7 @@ class Projet(NumeroUniqueMixin, models.Model):
         verbose_name_plural = "Projets"
 
 
-@reversion.register()
+@reversion.register(follow=["documents"])
 class Depense(NumeroUniqueMixin, models.Model):
     """Une dépense correspond à un paiement réalisé en lien avec une facture
     """

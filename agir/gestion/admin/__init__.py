@@ -1,10 +1,15 @@
 from functools import partial
 
+import dateutil
 from django import forms
 from django.contrib import admin
+from django.contrib.admin.options import BaseModelAdmin
+from django.utils import timezone
 from django.utils.html import format_html_join
+from reversion.admin import VersionAdmin
 
 from agir.gestion.models import Depense, Projet, Compte, Document, Fournisseur
+from agir.people.models import Person
 
 
 class CommentairesForm(forms.ModelForm):
@@ -12,7 +17,7 @@ class CommentairesForm(forms.ModelForm):
         label="Ajouter un commentaire", required=False, widget=forms.Textarea()
     )
 
-    def __init__(self, *args, user, **kwargs):
+    def __init__(self, *args, user=None, **kwargs):
         self.user = user
         super().__init__(*args, **kwargs)
 
@@ -20,15 +25,15 @@ class CommentairesForm(forms.ModelForm):
         if self.cleaned_data.get("nouveau_commentaire"):
             self.instance.commentaires.append(
                 {
-                    "auteur": None,
-                    "date": None,
+                    "auteur": str(self.user.person.id),
+                    "date": timezone.now().isoformat(),
                     "message": self.cleaned_data["nouveau_commentaire"],
                 }
             )
         return super().save(commit=commit)
 
 
-class BaseMixin(admin.ModelAdmin):
+class BaseMixin(BaseModelAdmin):
     form = CommentairesForm
 
     search_fields = ("numero",)
@@ -43,7 +48,18 @@ class BaseMixin(admin.ModelAdmin):
         return partial(form, user=request.user)
 
     def get_readonly_fields(self, request, obj=None):
-        return super().get_readonly_fields(request, obj=obj) + ("bloc_commentaires",)
+        return super().get_readonly_fields(request, obj=obj) + (
+            "bloc_commentaires",
+            "numero_",
+        )
+
+    def numero_(self, obj):
+        if obj.id:
+            return obj.numero
+        else:
+            return "-"
+
+    numero_.short_description = "Numéro automatique"
 
     def bloc_commentaires(self, obj):
         if obj and obj.commentaires:
@@ -51,7 +67,13 @@ class BaseMixin(admin.ModelAdmin):
                 "",
                 "<div><strong>{} — {}</strong><p>{}</p></div>",
                 (
-                    (com["auteur"], com["date"], com["message"])
+                    (
+                        Person.objects.filter(id=com["auteur"]).first(),
+                        dateutil.parser.parse(com["date"]).strftime(
+                            "%H:%M le %d/%m/%Y"
+                        ),
+                        com["message"],
+                    )
                     for com in obj.commentaires
                 ),
             )
@@ -68,7 +90,7 @@ class CompteAdmin(admin.ModelAdmin):
 
 
 @admin.register(Fournisseur)
-class FournisseurAdmin(admin.ModelAdmin):
+class FournisseurAdmin(VersionAdmin):
     list_display = ("nom", "contact_phone", "contact_email")
 
     fieldsets = (
@@ -90,7 +112,7 @@ class FournisseurAdmin(admin.ModelAdmin):
 
 
 @admin.register(Document)
-class DocumentAdmin(BaseMixin, admin.ModelAdmin):
+class DocumentAdmin(BaseMixin, VersionAdmin):
     list_display = (
         "numero",
         "titre",
@@ -105,7 +127,7 @@ class DocumentAdmin(BaseMixin, admin.ModelAdmin):
             None,
             {
                 "fields": (
-                    "numero",
+                    "numero_",
                     "titre",
                     "identifiant",
                     "type",
@@ -118,23 +140,44 @@ class DocumentAdmin(BaseMixin, admin.ModelAdmin):
         ("Commentaires", {"fields": ("bloc_commentaires", "nouveau_commentaire")}),
     )
 
-    readonly_fields = ("numero",)
+
+class DocumentInlineForm(forms.ModelForm):
+    DOCUMENTS_FIELDS = ("titre", "type", "statut", "fichier")
+
+    def __init__(self, *args, initial=None, instance=None, **kwargs):
+        if initial is None:
+            initial = {}
+
+        if instance and instance.document:
+            for f in self.DOCUMENTS_FIELDS:
+                initial.setdefault(f, getattr(instance.document, f))
+
+        super().__init__(*args, instance=instance, initial=initial, **kwargs)
+
+        if instance and instance.document:
+            self.fields["document"].disabled = True
+        else:
+            for f in self.DOCUMENTS_FIELDS:
+                self.fields[f].disabled = True
+
+
+_document_fields = {
+    f.name: f.formfield()
+    for f in Document._meta.get_fields()
+    if f.name in DocumentInlineForm.DOCUMENTS_FIELDS
+}
+_document_fields.update(DocumentInlineForm.declared_fields)
+DocumentInlineForm.base_fields = DocumentInlineForm.declared_fields = _document_fields
 
 
 class BaseDocumentInline(admin.TabularInline):
     extra = 0
     show_change_link = True
+    form = DocumentInlineForm
 
     autocomplete_fields = ("document",)
 
-    # fields = readonly_fields = (
-    #     "numero",
-    #     "titre",
-    #     "type",
-    #     "statut",
-    #     "requis",
-    #     "fichier",
-    # )
+    fields = ("document", *DocumentInlineForm.DOCUMENTS_FIELDS)
 
 
 class DepenseDocumentInline(BaseDocumentInline):
@@ -142,9 +185,9 @@ class DepenseDocumentInline(BaseDocumentInline):
 
 
 @admin.register(Depense)
-class DepenseAdmin(BaseMixin, admin.ModelAdmin):
+class DepenseAdmin(BaseMixin, VersionAdmin):
     list_display = (
-        "numero",
+        "numero_",
         "titre",
         "montant",
         "paiement",
@@ -152,10 +195,8 @@ class DepenseAdmin(BaseMixin, admin.ModelAdmin):
         "projet",
     )
 
-    readonly_fields = ("numero",)
-
     fieldsets = (
-        (None, {"fields": ("numero", "titre", "compte", "montant", "description")}),
+        (None, {"fields": ("numero_", "titre", "compte", "montant", "description",)},),
         ("Informations de paiement", {"fields": ("fournisseur", "paiement")}),
         ("Commentaires", {"fields": ("bloc_commentaires", "nouveau_commentaire")}),
     )
@@ -163,19 +204,12 @@ class DepenseAdmin(BaseMixin, admin.ModelAdmin):
     inlines = [DepenseDocumentInline]
 
 
-class DepenseInline(admin.StackedInline):
+class DepenseInline(BaseMixin, admin.TabularInline):
     model = Depense
     extra = 0
     show_change_link = True
 
-    fields = (
-        "numero",
-        "titre",
-        "montant",
-        "paiement",
-        "compte",
-    )
-    readonly_fields = ("numero",)
+    fields = ("numero_", "titre", "montant", "paiement", "compte")
 
 
 class ProjetDocumentInline(BaseDocumentInline):
@@ -183,7 +217,7 @@ class ProjetDocumentInline(BaseDocumentInline):
 
 
 @admin.register(Projet)
-class ProjetAdmin(BaseMixin, admin.ModelAdmin):
+class ProjetAdmin(BaseMixin, VersionAdmin):
     list_display = ("numero", "titre", "type", "statut")
 
     fieldsets = (
